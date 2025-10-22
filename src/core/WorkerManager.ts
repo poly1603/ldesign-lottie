@@ -10,9 +10,11 @@ export interface WorkerTask<T = any> {
   type: 'parse' | 'compress' | 'decompress' | 'optimize'
   data: any
   options?: any
+  priority?: number // 优先级：数字越大优先级越高
   resolve: (result: T) => void
   reject: (error: Error) => void
   startTime: number
+  retryCount?: number
 }
 
 export interface WorkerManagerConfig {
@@ -22,6 +24,12 @@ export interface WorkerManagerConfig {
   timeout?: number
   /** 是否启用 Worker（可以禁用用于调试） */
   enabled?: boolean
+  /** 是否使用共享 Worker */
+  useSharedWorker?: boolean
+  /** 最大任务重试次数 */
+  maxRetries?: number
+  /** 是否启用任务优先级 */
+  enablePriority?: boolean
 }
 
 /**
@@ -39,6 +47,21 @@ export class WorkerManager {
   private isInitialized = false
   private isSupported = true
 
+  // 共享 Worker 支持
+  private sharedWorker: SharedWorker | null = null
+  private sharedWorkerPort: MessagePort | null = null
+
+  // Worker 健康状态跟踪
+  private workerHealth = new Map<Worker, { tasks: number; errors: number; lastActive: number }>()
+
+  // 性能统计
+  private taskStats = {
+    completed: 0,
+    failed: 0,
+    retried: 0,
+    totalDuration: 0
+  }
+
   private constructor(config?: WorkerManagerConfig) {
     // 检查 Worker 支持
     this.isSupported = typeof Worker !== 'undefined'
@@ -50,7 +73,10 @@ export class WorkerManager {
     this.config = {
       workerCount: config?.workerCount ?? defaultWorkerCount,
       timeout: config?.timeout ?? 30000,
-      enabled: config?.enabled ?? this.isSupported
+      enabled: config?.enabled ?? this.isSupported,
+      useSharedWorker: config?.useSharedWorker ?? false,
+      maxRetries: config?.maxRetries ?? 3,
+      enablePriority: config?.enablePriority ?? true
     }
   }
 
@@ -78,11 +104,31 @@ export class WorkerManager {
     }
 
     try {
-      // 创建 Worker 池
-      for (let i = 0; i < this.config.workerCount; i++) {
-        const worker = this.createWorker()
-        this.workers.push(worker)
-        this.availableWorkers.push(worker)
+      // 尝试使用共享 Worker
+      if (this.config.useSharedWorker && typeof SharedWorker !== 'undefined') {
+        try {
+          this.initSharedWorker()
+          console.log('[WorkerManager] Using Shared Worker')
+        } catch (error) {
+          console.warn('[WorkerManager] Shared Worker failed, falling back to dedicated workers:', error)
+          this.config.useSharedWorker = false
+        }
+      }
+
+      // 如果不使用共享 Worker，创建专用 Worker 池
+      if (!this.config.useSharedWorker) {
+        for (let i = 0; i < this.config.workerCount; i++) {
+          const worker = this.createWorker()
+          this.workers.push(worker)
+          this.availableWorkers.push(worker)
+
+          // 初始化健康状态
+          this.workerHealth.set(worker, {
+            tasks: 0,
+            errors: 0,
+            lastActive: Date.now()
+          })
+        }
       }
 
       this.isInitialized = true
@@ -90,6 +136,92 @@ export class WorkerManager {
     } catch (error) {
       console.error('[WorkerManager] Failed to initialize:', error)
       this.config.enabled = false
+    }
+  }
+
+  /**
+   * 初始化共享 Worker
+   */
+  private initSharedWorker(): void {
+    this.sharedWorker = new SharedWorker(
+      new URL('../workers/lottie.worker.ts', import.meta.url),
+      { type: 'module', name: 'lottie-shared-worker' }
+    )
+
+    this.sharedWorkerPort = this.sharedWorker.port
+    this.sharedWorkerPort.start()
+
+    // 监听消息
+    this.sharedWorkerPort.onmessage = (e: MessageEvent<WorkerResponse>) => {
+      this.handleSharedWorkerMessage(e.data)
+    }
+
+    // 监听错误
+    this.sharedWorker.onerror = (error) => {
+      console.error('[WorkerManager] Shared Worker error:', error)
+    }
+  }
+
+  /**
+   * 处理共享 Worker 消息
+   */
+  private handleSharedWorkerMessage(response: WorkerResponse): void {
+    const { id, result, error, duration } = response
+
+    const task = this.pendingTasks.get(id)
+    if (!task) {
+      console.warn('[WorkerManager] Received response for unknown task:', id)
+      return
+    }
+
+    this.pendingTasks.delete(id)
+
+    if (duration) {
+      const totalTime = performance.now() - task.startTime
+      this.taskStats.totalDuration += totalTime
+      console.log(`[WorkerManager] Shared Worker task ${id} completed in ${totalTime.toFixed(2)}ms`)
+    }
+
+    if (error) {
+      const retryCount = task.retryCount || 0
+      if (retryCount < this.config.maxRetries) {
+        task.retryCount = retryCount + 1
+        this.taskQueue.unshift(task)
+        this.taskStats.retried++
+      } else {
+        this.taskStats.failed++
+        task.reject(new Error(error))
+      }
+    } else {
+      this.taskStats.completed++
+      task.resolve(result)
+    }
+
+    this.processSharedWorkerQueue()
+  }
+
+  /**
+   * 处理共享 Worker 队列
+   */
+  private processSharedWorkerQueue(): void {
+    if (!this.sharedWorkerPort || this.taskQueue.length === 0) return
+
+    if (this.config.enablePriority && this.taskQueue.length > 1) {
+      this.taskQueue.sort((a, b) => (b.priority || 0) - (a.priority || 0))
+    }
+
+    while (this.taskQueue.length > 0) {
+      const task = this.taskQueue.shift()!
+      this.pendingTasks.set(task.id, task)
+
+      const message: WorkerMessage = {
+        type: task.type,
+        id: task.id,
+        data: task.data,
+        options: task.options
+      }
+
+      this.sharedWorkerPort.postMessage(message)
     }
   }
 
@@ -140,16 +272,39 @@ export class WorkerManager {
     // 标记 Worker 为可用
     this.availableWorkers.push(worker)
 
+    // 更新 Worker 健康状态
+    const health = this.workerHealth.get(worker)
+    if (health) {
+      health.lastActive = Date.now()
+    }
+
     // 记录性能
     if (duration) {
       const totalTime = performance.now() - task.startTime
+      this.taskStats.totalDuration += totalTime
       console.log(`[WorkerManager] Task ${id} completed in ${totalTime.toFixed(2)}ms (worker: ${duration.toFixed(2)}ms)`)
     }
 
     // 处理结果
     if (error) {
-      task.reject(new Error(error))
+      // 尝试重试
+      const retryCount = task.retryCount || 0
+      if (retryCount < this.config.maxRetries) {
+        console.warn(`[WorkerManager] Task ${id} failed, retrying (${retryCount + 1}/${this.config.maxRetries})`)
+        task.retryCount = retryCount + 1
+        this.taskQueue.unshift(task) // 添加到队列前面
+        this.taskStats.retried++
+      } else {
+        this.taskStats.failed++
+        task.reject(new Error(error))
+
+        // 更新 Worker 错误计数
+        if (health) {
+          health.errors++
+        }
+      }
     } else {
+      this.taskStats.completed++
       task.resolve(result)
     }
 
@@ -232,16 +387,30 @@ export class WorkerManager {
   }
 
   /**
-   * 处理任务队列
+   * 处理任务队列（支持优先级）
    */
   private processQueue(): void {
+    // 如果启用优先级，先排序队列
+    if (this.config.enablePriority && this.taskQueue.length > 1) {
+      this.taskQueue.sort((a, b) => (b.priority || 0) - (a.priority || 0))
+    }
+
     // 处理队列中的任务
     while (this.taskQueue.length > 0 && this.availableWorkers.length > 0) {
       const task = this.taskQueue.shift()!
-      const worker = this.availableWorkers.shift()!
+      const worker = this.getBestWorker()
+
+      if (!worker) break
 
       // 记录待处理任务
       this.pendingTasks.set(task.id, task)
+
+      // 更新 Worker 健康状态
+      const health = this.workerHealth.get(worker)
+      if (health) {
+        health.tasks++
+        health.lastActive = Date.now()
+      }
 
       // 发送消息给 Worker
       const message: WorkerMessage = {
@@ -251,8 +420,49 @@ export class WorkerManager {
         options: task.options
       }
 
-      worker.postMessage(message)
+      // 使用 Transferable Objects 优化大数据传输
+      const transferList = this.getTransferableObjects(task.data)
+      if (transferList.length > 0) {
+        worker.postMessage(message, transferList)
+      } else {
+        worker.postMessage(message)
+      }
     }
+  }
+
+  /**
+   * 获取最佳 Worker（负载最小的）
+   */
+  private getBestWorker(): Worker | null {
+    if (this.availableWorkers.length === 0) return null
+
+    // 移除第一个可用 Worker
+    const worker = this.availableWorkers.shift()!
+
+    // 简单策略：返回第一个可用的
+    // 更复杂的策略可以基于 Worker 健康状态选择
+    return worker
+  }
+
+  /**
+   * 获取可传输对象
+   */
+  private getTransferableObjects(data: any): Transferable[] {
+    const transferList: Transferable[] = []
+
+    // 检查 ArrayBuffer
+    if (data instanceof ArrayBuffer) {
+      transferList.push(data)
+    } else if (data && typeof data === 'object') {
+      // 递归检查对象中的 ArrayBuffer
+      Object.values(data).forEach(value => {
+        if (value instanceof ArrayBuffer) {
+          transferList.push(value)
+        }
+      })
+    }
+
+    return transferList
   }
 
   /**
@@ -321,13 +531,31 @@ export class WorkerManager {
     pendingTasks: number
     queuedTasks: number
     isEnabled: boolean
+    tasksCompleted: number
+    tasksFailed: number
+    tasksRetried: number
+    averageDuration: number
+    workerHealth: Array<{ tasks: number; errors: number; errorRate: number }>
   } {
+    const workerHealthStats = Array.from(this.workerHealth.values()).map(health => ({
+      tasks: health.tasks,
+      errors: health.errors,
+      errorRate: health.tasks > 0 ? health.errors / health.tasks : 0
+    }))
+
     return {
       totalWorkers: this.workers.length,
       availableWorkers: this.availableWorkers.length,
       pendingTasks: this.pendingTasks.size,
       queuedTasks: this.taskQueue.length,
-      isEnabled: this.config.enabled
+      isEnabled: this.config.enabled,
+      tasksCompleted: this.taskStats.completed,
+      tasksFailed: this.taskStats.failed,
+      tasksRetried: this.taskStats.retried,
+      averageDuration: this.taskStats.completed > 0
+        ? this.taskStats.totalDuration / this.taskStats.completed
+        : 0,
+      workerHealth: workerHealthStats
     }
   }
 

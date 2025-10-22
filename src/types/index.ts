@@ -81,8 +81,14 @@ export interface AdvancedOptions {
   maxMemory?: number
   /** 最小 FPS 阈值 */
   minFps?: number
+  /** 目标 FPS */
+  targetFPS?: number
   /** 是否启用自动降级 */
   enableAutoDegradation?: boolean
+  /** 是否启用智能跳帧 */
+  enableSmartFrameSkip?: boolean
+  /** 是否使用 OffscreenCanvas */
+  useOffscreenCanvas?: boolean
   /** 是否缓存动画数据 */
   enableCache?: boolean
   /** 缓存 key */
@@ -174,6 +180,8 @@ export interface ILottieInstance {
   resize(): void
   /** 获取性能指标 */
   getMetrics(): PerformanceMetrics | null
+  /** 切换渲染器 */
+  switchRenderer?(renderer: 'svg' | 'canvas' | 'html'): void
   /** 监听事件 */
   on<K extends keyof LottieEvents>(event: K, callback: LottieEvents[K]): void
   /** 移除事件监听 */

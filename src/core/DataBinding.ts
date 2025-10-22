@@ -1,6 +1,16 @@
 import type { LottieInstance } from './LottieInstance';
 
 /**
+ * 数据验证器
+ */
+export type Validator = (value: any) => boolean | string
+
+/**
+ * 数据转换管道
+ */
+export type TransformPipe = (value: any, context?: any) => any
+
+/**
  * 数据绑定配置
  */
 export interface DataBindingConfig {
@@ -14,6 +24,14 @@ export interface DataBindingConfig {
   transform?: (value: any) => any;
   /** 格式化函数 */
   formatter?: (value: any) => string;
+  /** 转换管道 */
+  pipes?: TransformPipe[];
+  /** 验证器 */
+  validators?: Validator[];
+  /** 双向绑定 */
+  twoWay?: boolean;
+  /** 默认值 */
+  defaultValue?: any;
 }
 
 /**
@@ -39,9 +57,47 @@ export class DataBinding {
 
     // 如果数据已存在，立即应用
     const value = this.getValueByPath(config.path);
-    if (value !== undefined) {
-      this.applyBinding(config, value);
+    const finalValue = value !== undefined ? value : config.defaultValue
+
+    if (finalValue !== undefined) {
+      this.applyBindingWithValidation(config, finalValue);
     }
+
+    // 设置响应式监听
+    if (!this.watchers.has(config.path)) {
+      this.watchers.set(config.path, []);
+    }
+  }
+
+  /**
+   * 应用带验证的绑定
+   */
+  private applyBindingWithValidation(config: DataBindingConfig, value: any): void {
+    // 验证数据
+    if (config.validators && config.validators.length > 0) {
+      for (const validator of config.validators) {
+        const result = validator(value);
+        if (result !== true) {
+          const error = typeof result === 'string' ? result : 'Validation failed';
+          console.warn(`[DataBinding] Validation failed for ${config.path}:`, error);
+          return;
+        }
+      }
+    }
+
+    // 应用转换管道
+    let transformedValue = value;
+    if (config.pipes && config.pipes.length > 0) {
+      transformedValue = config.pipes.reduce((val, pipe) => pipe(val), value);
+    }
+
+    // 应用传统 transform
+    if (config.transform) {
+      transformedValue = config.transform(transformedValue);
+    }
+
+    // 应用绑定
+    this.applyBinding(config, transformedValue);
   }
 
   /**
@@ -61,7 +117,7 @@ export class DataBinding {
     this.bindings.forEach((config) => {
       if (config.path === path || path.startsWith(config.path + '.')) {
         const bindValue = this.getValueByPath(config.path);
-        this.applyBinding(config, bindValue);
+        this.applyBindingWithValidation(config, bindValue);
       }
     });
 

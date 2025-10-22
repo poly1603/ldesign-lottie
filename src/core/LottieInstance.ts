@@ -19,6 +19,21 @@ export class LottieInstance implements ILottieInstance {
   private intersectionObserver: IntersectionObserver | null = null
   private isIntersecting: boolean = false
 
+  // 智能跳帧相关
+  private frameSkipEnabled: boolean = false
+  private targetFps: number = 60
+  private frameSkipRatio: number = 1
+  private lastFrameTime: number = 0
+  private frameCounter: number = 0
+
+  // OffscreenCanvas 支持
+  private offscreenCanvas: OffscreenCanvas | null = null
+  private useOffscreenCanvas: boolean = false
+
+  // 渲染器切换
+  private currentRenderer: 'svg' | 'canvas' | 'html' = 'svg'
+  private rendererSwitchCount: number = 0
+
   constructor(config: LottieConfig) {
     this.id = `lottie-${++instanceCounter}-${Date.now()}`
     this.name = config.name || this.id
@@ -288,6 +303,7 @@ export class LottieInstance implements ILottieInstance {
       console.warn(`[LottieInstance] Low FPS detected: ${metrics.fps}`)
       if (enableAutoDegradation) {
         this.degradeQuality()
+        this.enableSmartFrameSkip(metrics.fps)
       }
     }
 
@@ -297,6 +313,120 @@ export class LottieInstance implements ILottieInstance {
       if (enableAutoDegradation) {
         this.degradeQuality()
       }
+    }
+  }
+
+  /**
+   * 启用智能跳帧
+   */
+  private enableSmartFrameSkip(currentFps: number): void {
+    if (this.frameSkipEnabled) return
+
+    this.frameSkipEnabled = true
+    this.targetFps = this._config.advanced?.targetFPS || 30
+
+    // 计算跳帧比例
+    if (currentFps > 0 && currentFps < this.targetFps) {
+      this.frameSkipRatio = Math.ceil(this.targetFps / currentFps)
+    }
+
+    console.log(`[LottieInstance] Smart frame skip enabled: skip ratio ${this.frameSkipRatio}`)
+  }
+
+  /**
+   * 禁用智能跳帧
+   */
+  private disableSmartFrameSkip(): void {
+    this.frameSkipEnabled = false
+    this.frameSkipRatio = 1
+    this.frameCounter = 0
+  }
+
+  /**
+   * 判断是否应该渲染当前帧
+   */
+  private shouldRenderFrame(): boolean {
+    if (!this.frameSkipEnabled) return true
+
+    this.frameCounter++
+    if (this.frameCounter >= this.frameSkipRatio) {
+      this.frameCounter = 0
+      return true
+    }
+    return false
+  }
+
+  /**
+   * 初始化 OffscreenCanvas
+   */
+  private initOffscreenCanvas(): boolean {
+    // 检查是否支持 OffscreenCanvas
+    if (typeof OffscreenCanvas === 'undefined') {
+      return false
+    }
+
+    // 只对 canvas 渲染器使用
+    if (this._config.renderer !== 'canvas') {
+      return false
+    }
+
+    try {
+      const rect = this._container?.getBoundingClientRect()
+      if (!rect) return false
+
+      this.offscreenCanvas = new OffscreenCanvas(
+        rect.width || 300,
+        rect.height || 150
+      )
+      this.useOffscreenCanvas = true
+
+      console.log('[LottieInstance] OffscreenCanvas initialized')
+      return true
+    } catch (error) {
+      console.warn('[LottieInstance] Failed to initialize OffscreenCanvas:', error)
+      return false
+    }
+  }
+
+  /**
+   * 切换渲染器
+   */
+  switchRenderer(renderer: 'svg' | 'canvas' | 'html'): void {
+    if (!this._animation || this.currentRenderer === renderer) return
+
+    // 防止频繁切换
+    if (this.rendererSwitchCount > 3) {
+      console.warn('[LottieInstance] Too many renderer switches, skipping')
+      return
+    }
+
+    try {
+      // 保存当前状态
+      const currentTime = this._animation.currentFrame
+      const isPlaying = this._state === 'playing'
+
+      // 销毁当前动画
+      this._animation.destroy()
+
+      // 更新配置
+      this._config.renderer = renderer
+      this.currentRenderer = renderer
+
+      // 重新加载
+      this.loadAnimation().then(() => {
+        if (this._animation) {
+          // 恢复状态
+          this._animation.goToAndStop(currentTime, true)
+          if (isPlaying) {
+            this.play()
+          }
+        }
+      })
+
+      this.rendererSwitchCount++
+      console.log(`[LottieInstance] Switched to ${renderer} renderer`)
+    } catch (error) {
+      console.error('[LottieInstance] Failed to switch renderer:', error)
     }
   }
 
@@ -478,7 +608,7 @@ export class LottieInstance implements ILottieInstance {
     const configCallback = this._config.events?.[event]
     if (configCallback) {
       try {
-        ;(configCallback as any)(...args)
+        ; (configCallback as any)(...args)
       } catch (error) {
         console.error(`[LottieInstance] Error in config ${event} callback:`, error)
       }
