@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lottie Lit Demo</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    
+    h1 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 40px;
+    }
+    
+    .demo-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 30px;
+    }
+    
+    .demo-card {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+    }
+    
+    .demo-card h2 {
+      font-size: 1.25rem;
+      margin-bottom: 20px;
+      color: #444;
+    }
+    
+    lottie-element, lottie-player {
+      display: block;
+      height: 250px;
+      background: #f9f9f9;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    
+    .info {
+      margin: 16px 0;
+      padding: 12px 16px;
+      background: #f0f4f8;
+      border-radius: 6px;
+      font-size: 14px;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🚀 Lottie Lit Demo</h1>
+    
+    <div class="demo-grid">
+      <!-- 基础示例 -->
+      <div class="demo-card">
+        <h2>基础 Web Component</h2>
+        <lottie-element
+          id="basic-lottie"
+          path="/animation.json"
+          loop
+          autoplay
+          renderer="svg"
+        ></lottie-element>
+        <div class="info" id="basic-info">加载中...</div>
+      </div>
+      
+      <!-- 播放器组件 -->
+      <div class="demo-card">
+        <h2>带控制器的播放器</h2>
+        <lottie-player
+          id="player-lottie"
+          path="/animation.json"
+          loop
+          autoplay
+          show-controls
+          show-progress
+          show-info
+        ></lottie-player>
+      </div>
+      
+      <!-- Canvas 渲染 -->
+      <div class="demo-card">
+        <h2>Canvas 渲染器</h2>
+        <lottie-element
+          id="canvas-lottie"
+          path="/animation.json"
+          loop
+          autoplay
+          renderer="canvas"
+          speed="2"
+        ></lottie-element>
+        <div class="info">速度: 2x</div>
+      </div>
+      
+      <!-- 交互式 -->
+      <div class="demo-card">
+        <h2>交互式动画</h2>
+        <lottie-element
+          id="interactive-lottie"
+          path="/animation.json"
+          loop="false"
+          autoplay="false"
+        ></lottie-element>
+        <div class="info" id="interactive-info">悬停播放</div>
+      </div>
+    </div>
+  </div>
+  
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
+
