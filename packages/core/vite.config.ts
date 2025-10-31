@@ -23,11 +23,24 @@ export default defineConfig({
       output: {
         globals: {
           'lottie-web': 'lottie'
-        }
+        },
+        // 处理动态导入的chunk
+        chunkFileNames: '[name].js',
+        assetFileNames: '[name][extname]'
       }
     },
     minify: 'terser',
     sourcemap: true
+  },
+  // Worker configuration
+  worker: {
+    format: 'es',
+    // 禁用rollup选项，避免路径问题
+    rollupOptions: {
+      output: {
+        entryFileNames: 'lottie.worker.js'
+      }
+    }
   },
   resolve: {
     alias: {

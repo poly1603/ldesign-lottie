@@ -3,6 +3,7 @@
  * 管理 Web Worker 的生命周期和任务调度
  */
 
+import { createLottieWorker, isWorkerSupported } from './WorkerFactory'
 import type { WorkerMessage, WorkerResponse } from '../workers/lottie.worker'
 
 export interface WorkerTask<T = any> {
@@ -64,7 +65,7 @@ export class WorkerManager {
 
   private constructor(config?: WorkerManagerConfig) {
     // 检查 Worker 支持
-    this.isSupported = typeof Worker !== 'undefined'
+    this.isSupported = isWorkerSupported()
 
     // 确定 Worker 数量
     const cpuCount = navigator.hardwareConcurrency || 4
@@ -73,6 +74,7 @@ export class WorkerManager {
     this.config = {
       workerCount: config?.workerCount ?? defaultWorkerCount,
       timeout: config?.timeout ?? 30000,
+      // 使用 Blob URL 方式，默认启用
       enabled: config?.enabled ?? this.isSupported,
       useSharedWorker: config?.useSharedWorker ?? false,
       maxRetries: config?.maxRetries ?? 3,
@@ -118,16 +120,23 @@ export class WorkerManager {
       // 如果不使用共享 Worker，创建专用 Worker 池
       if (!this.config.useSharedWorker) {
         for (let i = 0; i < this.config.workerCount; i++) {
-          const worker = this.createWorker()
-          this.workers.push(worker)
-          this.availableWorkers.push(worker)
+          try {
+            const worker = this.createWorker()
+            this.workers.push(worker)
+            this.availableWorkers.push(worker)
 
-          // 初始化健康状态
-          this.workerHealth.set(worker, {
-            tasks: 0,
-            errors: 0,
-            lastActive: Date.now()
-          })
+            // 初始化健康状态
+            this.workerHealth.set(worker, {
+              tasks: 0,
+              errors: 0,
+              lastActive: Date.now()
+            })
+          } catch (error) {
+            console.warn(`[WorkerManager] Failed to create worker ${i}, disabling workers`)
+            this.config.enabled = false
+            this.isSupported = false
+            return
+          }
         }
       }
 
@@ -143,10 +152,9 @@ export class WorkerManager {
    * 初始化共享 Worker
    */
   private initSharedWorker(): void {
-    this.sharedWorker = new SharedWorker(
-      new URL('../workers/lottie.worker.ts', import.meta.url),
-      { type: 'module', name: 'lottie-shared-worker' }
-    )
+    // SharedWorker 暂不支持 Blob URL，需要外部文件
+    // 暂时禁用 SharedWorker 功能
+    throw new Error('SharedWorker is not supported with Blob URL workers')
 
     this.sharedWorkerPort = this.sharedWorker.port
     this.sharedWorkerPort.start()
@@ -229,24 +237,26 @@ export class WorkerManager {
    * 创建 Worker
    */
   private createWorker(): Worker {
-    // 使用 Vite 的 Worker 构造函数
-    const worker = new Worker(
-      new URL('../workers/lottie.worker.ts', import.meta.url),
-      { type: 'module' }
-    )
+    // 使用 Blob URL 方式创建 Worker
+    try {
+      const worker = createLottieWorker()
 
-    // 监听消息
-    worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
-      this.handleWorkerMessage(worker, e.data)
+      // 监听消息
+      worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
+        this.handleWorkerMessage(worker, e.data)
+      }
+
+      // 监听错误
+      worker.onerror = (error) => {
+        console.error('[WorkerManager] Worker error:', error)
+        this.handleWorkerError(worker, error)
+      }
+
+      return worker
+    } catch (error) {
+      console.warn('[WorkerManager] Failed to create worker:', error)
+      throw error
     }
-
-    // 监听错误
-    worker.onerror = (error) => {
-      console.error('[WorkerManager] Worker error:', error)
-      this.handleWorkerError(worker, error)
-    }
-
-    return worker
   }
 
   /**

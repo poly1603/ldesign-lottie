@@ -1,0 +1,71 @@
+{
+  "name": "@ldesign/lottie-angular",
+  "version": "2.0.0",
+  "description": "Angular component for Lottie animations",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "vite build",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "type-check": "tsc --noEmit",
+    "clean": "rimraf dist node_modules"
+  },
+  "peerDependencies": {
+    "@angular/core": ">=14.0.0",
+    "@angular/common": ">=14.0.0"
+  },
+  "dependencies": {
+    "@ldesign/lottie-core": "workspace:*",
+    "tslib": "^2.6.2"
+  },
+  "devDependencies": {
+    "@angular/core": "^18.0.0",
+    "@angular/common": "^18.0.0",
+    "@angular/platform-browser": "^18.0.0",
+    "@angular/platform-browser-dynamic": "^18.0.0",
+    "@antfu/eslint-config": "^6.0.0",
+    "@types/node": "^20.10.0",
+    "eslint": "^9.18.0",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.7.3",
+    "vitest": "^1.6.1",
+    "@vitest/coverage-v8": "^1.6.1",
+    "zone.js": "^0.15.0",
+    "rxjs": "^7.8.0"
+  },
+  "keywords": [
+    "lottie",
+    "angular",
+    "animation",
+    "component",
+    "directive"
+  ],
+  "author": "LDesign Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ldesign/lottie",
+    "directory": "packages/angular"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

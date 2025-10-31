@@ -4,12 +4,15 @@ import type { ILottieInstance, LottieConfig } from '@ldesign/lottie-core'
 export interface LottieProps extends Omit<LottieConfig, 'container'> {
   className?: string
   style?: CSSProperties
+  direction?: 1 | -1
   onReady?: (instance: ILottieInstance) => void
   onError?: (error: Error) => void
   onComplete?: () => void
   onLoopComplete?: () => void
   onEnterFrame?: (event: any) => void
   onSegmentStart?: (event: any) => void
+  onDataReady?: () => void
+  onDataFailed?: () => void
   onDestroy?: () => void
 }
 
@@ -29,12 +32,15 @@ export interface LottieRef {
 }
 
 export interface UseLottieOptions extends Omit<LottieConfig, 'container'> {
+  direction?: 1 | -1
   onReady?: (instance: ILottieInstance) => void
   onError?: (error: Error) => void
   onComplete?: () => void
   onLoopComplete?: () => void
   onEnterFrame?: (event: any) => void
   onSegmentStart?: (event: any) => void
+  onDataReady?: () => void
+  onDataFailed?: () => void
   onDestroy?: () => void
 }
 

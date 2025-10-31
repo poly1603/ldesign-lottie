@@ -269,6 +269,19 @@ export class LottieManager {
   }
 
   /**
+   * 恢复所有实例
+   */
+  resumeAll(): void {
+    this.instances.forEach(instance => {
+      try {
+        instance.play()
+      } catch (error) {
+        console.error('[LottieManager] Error resuming instance:', error)
+      }
+    })
+  }
+
+  /**
    * 停止所有实例
    */
   stopAll(): void {
